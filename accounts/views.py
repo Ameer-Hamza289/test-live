@@ -56,7 +56,7 @@ def register(request):
 
 @login_required(login_url = 'login')
 def dashboard(request):
-    user_inquiry = Contact.objects.order_by('-create_date').filter(user_id=request.user.id)
+    user_inquiry = Contact.objects.order_by('-create_date').filter(email=request.user.email)
     # count = Contact.objects.order_by('-create_date').filter(user_id=request.user.id).count()
 
     data = {
