@@ -1,0 +1,368 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h3 class="mb-0">AI Voice Assistant</h3>
+                    <div class="d-flex align-items-center">
+                        <span id="call-duration" class="badge badge-light mr-3" style="display: none;">00:00</span>
+                        <span id="listening-indicator" class="badge badge-danger mr-2" style="display: none;">
+                            On Call
+                        </span>
+                        <div id="voice-indicator" class="rounded-circle" 
+                             style="width: 12px; height: 12px; background-color: #dc3545; display: none;"></div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Live Transcription -->
+                    <div id="live-transcript" class="alert alert-info mb-3" style="display: none;">
+                        <strong>You:</strong> <span id="current-speech"></span>
+                    </div>
+
+                    <!-- Conversation History -->
+                    <div id="conversation-log" class="mb-4" style="height: 300px; overflow-y: auto; padding: 15px;">
+                        <!-- Conversation history will appear here -->
+                    </div>
+                    
+                    <div class="text-center mb-3">
+                        <div id="status-message" class="text-muted mb-2">
+                            Click "Start Call" to begin conversation
+                        </div>
+                        <div class="btn-group">
+                            <button id="startCallButton" class="btn btn-success">
+                                <i class="fas fa-phone"></i> Start Call
+                            </button>
+                            <button id="endCallButton" class="btn btn-danger" style="display: none;">
+                                <i class="fas fa-phone-slash"></i> End Call
+                            </button>
+                            <button id="muteButton" class="btn btn-warning" style="display: none;">
+                                <i class="fas fa-microphone-slash"></i> Mute
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Call Transcript Modal -->
+            <div class="modal fade" id="transcriptModal" tabindex="-1" role="dialog">
+                <div class="modal-dialog modal-lg" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Call Transcript</h5>
+                            <button type="button" class="close" data-dismiss="modal">
+                                <span>&times;</span>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="transcript-content" style="max-height: 400px; overflow-y: auto;">
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-primary" id="downloadTranscript">
+                                Download Transcript
+                            </button>
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block javascript %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const startCallButton = document.getElementById('startCallButton');
+        const endCallButton = document.getElementById('endCallButton');
+        const muteButton = document.getElementById('muteButton');
+        const statusMessage = document.getElementById('status-message');
+        const conversationLog = document.getElementById('conversation-log');
+        const liveTranscript = document.getElementById('live-transcript');
+        const currentSpeech = document.getElementById('current-speech');
+        const listeningIndicator = document.getElementById('listening-indicator');
+        const voiceIndicator = document.getElementById('voice-indicator');
+        const callDuration = document.getElementById('call-duration');
+        const transcriptModal = new bootstrap.Modal(document.getElementById('transcriptModal'));
+        
+        let recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        let synthesis = window.speechSynthesis;
+        
+        // Call state
+        let isOnCall = false;
+        let isMuted = false;
+        let sessionId = null;
+        let callStartTime = null;
+        let durationTimer = null;
+        
+        // Configure recognition
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        let silenceTimer = null;
+        let currentQuery = '';
+        
+        function updateDuration() {
+            if (!callStartTime) return;
+            const duration = Math.floor((Date.now() - callStartTime) / 1000);
+            const minutes = Math.floor(duration / 60).toString().padStart(2, '0');
+            const seconds = (duration % 60).toString().padStart(2, '0');
+            callDuration.textContent = `${minutes}:${seconds}`;
+        }
+
+        function startCall() {
+            isOnCall = true;
+            sessionId = Date.now().toString();
+            callStartTime = Date.now();
+            startCallButton.style.display = 'none';
+            endCallButton.style.display = 'inline-block';
+            muteButton.style.display = 'inline-block';
+            callDuration.style.display = 'inline-block';
+            statusMessage.textContent = 'Call connected. Start speaking...';
+            durationTimer = setInterval(updateDuration, 1000);
+            recognition.start();
+            
+            // Initial greeting from AI
+            fetch('/voice-assistant/process/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    session_id: sessionId,
+                    is_call_start: true
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    addToConversation('Assistant', data.response, true);
+                    speak(data.response);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                statusMessage.textContent = 'Error starting call. Please try again.';
+                endCall();
+            });
+        }
+
+        function endCall() {
+            isOnCall = false;
+            recognition.stop();
+            clearInterval(durationTimer);
+            
+            // Get call transcript
+            fetch('/voice-assistant/process/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    session_id: sessionId,
+                    is_call_end: true
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success' && data.is_transcript) {
+                    displayTranscript(data.transcript);
+                }
+            });
+            
+            // Reset UI
+            startCallButton.style.display = 'inline-block';
+            endCallButton.style.display = 'none';
+            muteButton.style.display = 'none';
+            callDuration.style.display = 'none';
+            listeningIndicator.style.display = 'none';
+            voiceIndicator.style.display = 'none';
+            liveTranscript.style.display = 'none';
+            statusMessage.textContent = 'Call ended. Click "Start Call" to begin new conversation';
+        }
+
+        function toggleMute() {
+            isMuted = !isMuted;
+            muteButton.innerHTML = isMuted ? 
+                '<i class="fas fa-microphone"></i> Unmute' : 
+                '<i class="fas fa-microphone-slash"></i> Mute';
+            if (isMuted) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        }
+
+        function displayTranscript(transcript) {
+            const transcriptContent = document.getElementById('transcript-content');
+            transcriptContent.innerHTML = '';
+            
+            transcript.forEach(entry => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'mb-2';
+                messageDiv.innerHTML = `
+                    <small class="text-muted">${entry.timestamp}</small>
+                    <strong>${entry.speaker}:</strong> ${entry.text}
+                `;
+                transcriptContent.appendChild(messageDiv);
+            });
+            
+            transcriptModal.show();
+        }
+
+        function downloadTranscript() {
+            const transcriptContent = document.getElementById('transcript-content');
+            const text = transcriptContent.innerText;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `call_transcript_${sessionId}.txt`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        function startVoiceIndicator() {
+            voiceIndicator.style.display = 'block';
+            let opacity = 1;
+            const animate = () => {
+                opacity = opacity === 1 ? 0.3 : 1;
+                voiceIndicator.style.opacity = opacity;
+                if (isOnCall && !isMuted) {
+                    requestAnimationFrame(animate);
+                }
+            };
+            animate();
+        }
+
+        function resetSilenceTimer() {
+            if (silenceTimer) clearTimeout(silenceTimer);
+            silenceTimer = setTimeout(() => {
+                if (currentQuery.trim() && !isMuted) {
+                    processVoiceInput(currentQuery.trim());
+                    currentQuery = '';
+                    liveTranscript.style.display = 'none';
+                }
+            }, 1500);
+        }
+        
+        function addToConversation(speaker, text, isSystem = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `mb-3 ${speaker === 'You' ? 'text-right' : 'text-left'}`;
+            messageDiv.innerHTML = `
+                <div class="d-inline-block ${isSystem ? 'bg-warning' : (speaker === 'You' ? 'bg-light' : 'bg-primary text-white')} 
+                             rounded p-2" style="max-width: 80%;">
+                    <strong>${speaker}:</strong> ${text}
+                </div>
+            `;
+            conversationLog.appendChild(messageDiv);
+            conversationLog.scrollTop = conversationLog.scrollHeight;
+        }
+        
+        function speak(text) {
+            if (!isOnCall) return;
+            
+            // Stop recognition while assistant is speaking
+            recognition.stop();
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            
+            // Resume recognition after speaking is done
+            utterance.onend = function() {
+                if (isOnCall && !isMuted) {
+                    recognition.start();
+                }
+            };
+            
+            synthesis.speak(utterance);
+        }
+
+        async function processVoiceInput(text, isSystem = false) {
+            if (!isOnCall) return;
+            
+            try {
+                const response = await fetch('/voice-assistant/process/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        text: text,
+                        session_id: sessionId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    if (!isSystem && !data.is_assistant_response) {
+                        addToConversation('You', text);
+                    }
+                    if (data.response) {
+                        addToConversation('Assistant', data.response);
+                        speak(data.response);
+                    }
+                } else {
+                    addToConversation('System', data.message || 'Error processing request', true);
+                }
+            } catch (error) {
+                addToConversation('System', 'Error: Could not process request', true);
+                console.error('Error:', error);
+            }
+        }
+        
+        recognition.onresult = function(event) {
+            if (!isOnCall || isMuted || synthesis.speaking) return;  // Don't process input while assistant is speaking
+            
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript;
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+
+            if (finalTranscript) {
+                currentQuery += ' ' + finalTranscript;
+            }
+            currentSpeech.textContent = currentQuery + interimTranscript;
+            liveTranscript.style.display = 'block';
+            resetSilenceTimer();
+        };
+        
+        recognition.onstart = function() {
+            if (isOnCall && !isMuted) {
+                listeningIndicator.style.display = 'inline';
+                startVoiceIndicator();
+            }
+        };
+        
+        recognition.onerror = function(event) {
+            console.error('Speech recognition error:', event.error);
+            if (event.error !== 'no-speech') {
+                addToConversation('System', `Error: ${event.error}`, true);
+            }
+        };
+        
+        recognition.onend = function() {
+            if (isOnCall && !isMuted) {
+                recognition.start();
+            }
+        };
+
+        // Event listeners
+        startCallButton.addEventListener('click', startCall);
+        endCallButton.addEventListener('click', endCall);
+        muteButton.addEventListener('click', toggleMute);
+        document.getElementById('downloadTranscript').addEventListener('click', downloadTranscript);
+    });
+</script>
+{% endblock %}
+{% endblock %} 
