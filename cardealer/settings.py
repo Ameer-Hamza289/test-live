@@ -33,21 +33,23 @@ DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
 LOGIN_REDIRECT_URL = 'dashboard'
+ACCOUNT_LOGOUT_REDIRECT_URL = 'home'
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'cars.apps.CarsConfig',
-    'pages.apps.PagesConfig',
-    'accounts.apps.AccountsConfig',
-    'contacts.apps.ContactsConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'cars.apps.CarsConfig',
+    'pages.apps.PagesConfig',
+    'accounts.apps.AccountsConfig',
+    'contacts.apps.ContactsConfig',
+    'voice_assistant.apps.VoiceAssistantConfig',
     'ckeditor',
     'django.contrib.humanize',
     'django.contrib.sites',
@@ -92,6 +94,20 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'cardealer.wsgi.application'
 
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+# django-allauth settings
+ACCOUNT_AUTHENTICATION_METHOD = 'email'
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_SIGNUP_PASSWORD_ENTER_TWICE = True
+ACCOUNT_SESSION_REMEMBER = True
+ACCOUNT_UNIQUE_EMAIL = True
 
 # Database
 # https://docs.djangoproject.com/en/3.0/ref/settings/#databases
