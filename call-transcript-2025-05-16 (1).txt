@@ -1,0 +1,41 @@
+[4:29:41 PM] ASSISTANT: Hello! Thank you for calling our dealership. I'm your AI assistant. How can I help you today?
+
+[4:29:55 PM] USER: I was looking for a car can you help me with that
+
+[4:29:56 PM] ASSISTANT: Certainly!  We have a great selection of sedans, including the Toyota Camry, Honda Accord, and Ford Fusion, starting around $25,000.  You can browse our online inventory to see photos and details.  Let me know if you have any questions.
+
+[4:30:23 PM] USER: you guys do deal with like new brand cars or with the used as well
+
+[4:30:25 PM] ASSISTANT: Yes, we offer both new and used vehicles.  Our new inventory includes Toyota, Honda, Ford, and Chevrolet models.  Our used cars are generally under 5 years old and have less than 60,000 miles.
+
+[4:30:43 PM] USER: you guys do deal with like new brand cars or with the used as well okay
+
+[4:30:44 PM] ASSISTANT: Yes, we offer both new and used vehicles.
+
+[4:30:47 PM] USER: you guys do deal with like new brand cars or with the used as well okay can we like a casual
+
+[4:30:47 PM] ASSISTANT: Yes, we have a wide selection of both new and used vehicles.
+
+[4:30:58 PM] USER: you guys do deal with like new brand cars or with the used as well okay can we like a casual can we explore some option
+
+[4:31:08 PM] ASSISTANT: Yes, we offer both new and used vehicles.  Let's explore your options.
+
+[4:31:23 PM] USER: you guys do deal with like new brand cars or with the used as well okay can we like a casual can we explore some option what are the option is like in Toyota
+
+[4:31:33 PM] ASSISTANT: We have a selection of new Toyota models, including sedans, SUVs, and hybrids like the Prius.  We also have a range of used Toyotas under 5 years old and 60,000 miles.
+
+[4:31:51 PM] USER: you guys do deal with like new brand cars or with the used as well okay can we like a casual can we explore some option what are the option is like in Toyota okay thank you I'll visit you soon
+
+[4:31:52 PM] ASSISTANT: We offer both new and used Toyota vehicles.  We look forward to your visit!
+
+[4:32:04 PM] USER: you guys do deal with like new brand cars or with the used as well okay can we like a casual can we explore some option what are the option is like in Toyota okay thank you I'll visit you soon okay bye-bye
+
+[4:32:05 PM] ASSISTANT: We offer both new and used Toyota vehicles.  We look forward to your visit!
+
+[4:32:16 PM] USER: you guys do deal with like new brand cars or with the used as well okay can we like a casual can we explore some option what are the option is like in Toyota okay thank you I'll visit you soon okay bye-bye bye
+
+[4:32:17 PM] ASSISTANT: We offer both new and used Toyota vehicles. We look forward to your visit!
+
+[4:32:26 PM] USER: you guys do deal with like new brand cars or with the used as well okay can we like a casual can we explore some option what are the option is like in Toyota okay thank you I'll visit you soon okay bye-bye bye okay thank you
+
+[4:32:27 PM] ASSISTANT: We offer both new and used Toyota vehicles.  We look forward to your visit!
