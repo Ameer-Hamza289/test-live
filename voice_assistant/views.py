@@ -18,6 +18,16 @@ def voice_assistant(request):
     return render(request, 'voice_assistant/assistant.html')
 
 @csrf_exempt
+def test_api(request):
+    """Simple test endpoint to verify API functionality"""
+    return JsonResponse({
+        'status': 'success',
+        'message': 'API is working!',
+        'method': request.method,
+        'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+@csrf_exempt
 def process_voice(request):
     """Process voice input and return AI response"""
     if request.method == 'POST':
@@ -26,10 +36,9 @@ def process_voice(request):
             session_id = data.get('session_id')
             
             if not session_id:
-                return JsonResponse({
-                    'status': 'error',
-                    'message': 'No session ID provided'
-                }, status=400)
+                # Generate a session ID if one isn't provided
+                session_id = str(timezone.now().timestamp())
+                print(f"No session ID provided, generating one: {session_id}")
             
             # Handle new call start first
             if data.get('is_call_start'):
@@ -39,9 +48,10 @@ def process_voice(request):
                     # If session exists and is not ended, return error
                     if not session.end_time:
                         return JsonResponse({
-                            'status': 'error',
-                            'message': 'Session already active'
-                        }, status=400)
+                            'status': 'success',
+                            'response': "I'm still here. What can I help you with?",
+                            'is_assistant_response': True
+                        })
                     # If session exists but is ended, create a new one
                     session = CallSession.objects.create(
                         session_id=session_id,
@@ -71,16 +81,25 @@ def process_voice(request):
             try:
                 session = CallSession.objects.get(session_id=session_id)
             except ObjectDoesNotExist:
-                return JsonResponse({
-                    'status': 'error',
-                    'message': 'Session not found. Please start a new call.'
-                }, status=404)
+                # Create a new session on the fly if handling a message but session doesn't exist
+                if not data.get('is_call_end'):
+                    session = CallSession.objects.create(
+                        session_id=session_id,
+                        start_time=timezone.now()
+                    )
+                    print(f"Created new session on the fly: {session_id}")
+                else:
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': 'No active session found'
+                    })
             
             # Handle call end
             if data.get('is_call_end'):
-                session.end_time = timezone.now()
-                session.duration = session.end_time - session.start_time
-                session.save()
+                if not session.end_time:
+                    session.end_time = timezone.now()
+                    session.duration = session.end_time - session.start_time
+                    session.save()
                 
                 # Get transcript
                 messages = session.messages.all()
@@ -98,10 +117,10 @@ def process_voice(request):
             
             # Regular message processing
             if session.end_time:
-                return JsonResponse({
-                    'status': 'error',
-                    'message': 'This call has ended. Please start a new call.'
-                }, status=400)
+                # Reopen session if it was ended
+                session.end_time = None
+                session.save()
+                print(f"Reopened session: {session_id}")
             
             user_input = data.get('text', '')
             if not user_input:

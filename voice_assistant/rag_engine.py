@@ -1,16 +1,21 @@
 import os
 from typing import List, Dict
-import google.generativeai as genai
+import requests
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
 from dotenv import load_dotenv
+import json
+import google.generativeai as genai
 
 load_dotenv()
 
-# Initialize Gemini API
-genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-model = genai.GenerativeModel('gemini-2.0-flash')
+# Initialize Google Gemini API settings
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Initialize the Gemini model
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # Initialize sentence transformer for embeddings
 encoder = SentenceTransformer('all-MiniLM-L6-v2')
@@ -102,7 +107,7 @@ class RAGEngine:
         return "\n".join(relevant_docs)
 
     async def get_response(self, query: str, conversation_history: List[Dict] = None) -> str:
-        """Generate response using Gemini with RAG-enhanced context."""
+        """Generate response using Google Gemini with RAG-enhanced context."""
         try:
             # Get relevant context from knowledge base
             context = self.get_relevant_context(query)
@@ -110,38 +115,87 @@ class RAGEngine:
             # Prepare conversation history
             history_text = ""
             if conversation_history:
-                history_text = "\n".join([
-                    f"{'Customer' if msg['speaker'] == 'user' else 'Assistant'}: {msg['message']}"
-                    for msg in conversation_history[-3:]  # Include last 3 messages for context
-                ])
-
-            # Create enhanced prompt with context and history
-            history_section = f"Previous conversation:\n{history_text}\n" if history_text else ""
+                history_items = []
+                for msg in conversation_history[-3:]:  # Last 3 messages for brevity
+                    speaker = "Customer" if msg['speaker'] == 'user' else "Assistant"
+                    history_items.append(f"{speaker}: {msg['message']}")
+                history_text = "\n".join(history_items)
             
-            prompt = f"""You are an AI assistant for a car dealership. Be professional, helpful, and concise.
-Your role is to assist customers with inquiries about vehicles, services, and dealership information.
-Always maintain a friendly and professional tone, and provide specific details from the dealership information when available.
+            # Create the system prompt
+            system_prompt = """You are a car dealership AI assistant named CarBot. Be helpful, friendly, and concise.
+You have access to information about our dealership's inventory, services, financing options, and more.
+Keep your responses professional but conversational, direct, and to the point - like a helpful dealership employee.
+EXTREMELY IMPORTANT:
+1. Answer the customer's query ONLY - do not invent additional dialogue or future conversation
+2. Do not add hypothetical "Customer:" messages or responses in your answer
+3. Do not add any text after your answer
+4. Do not provide sample conversations
+5. Respond directly to the current query only, as if you were speaking to the customer right now"""
 
-Relevant dealership information:
-{context}
-
-{history_section}
-Customer: {query}
-
-Please provide a natural, conversational response that:
-1. Directly addresses the customer's query
-2. Uses specific details from the dealership information
-3. Maintains a helpful and professional tone
-4. Keeps the response concise but informative
-5. Offers relevant follow-up information when appropriate"""
+            # Format the entire prompt
+            prompt = f"{system_prompt}\n\n"
+            prompt += f"Relevant dealership information:\n{context}\n\n"
+            
+            if history_text:
+                prompt += f"Previous conversation:\n{history_text}\n\n"
+            
+            prompt += f"Customer: {query}\n\nAssistant:"
 
             # Generate response using Gemini
-            response = model.generate_content(prompt)
-            return response.text
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    top_p=0.9,
+                    top_k=40,
+                    max_output_tokens=150,  # Reduced for faster responses
+                    candidate_count=1
+                )
+            )
+
+            if response.text:
+                text = response.text.strip()
+                
+                # Clean up common formatting issues in model responses
+                prefixes_to_remove = [
+                    "Here's a potential response:", 
+                    "Assistant:", 
+                    "As the assistant, I would respond:", 
+                    "I would respond with:"
+                ]
+                
+                for prefix in prefixes_to_remove:
+                    if text.startswith(prefix):
+                        text = text[len(prefix):].strip()
+                
+                # Remove quotes if the entire response is wrapped in them
+                if text.startswith('"') and text.endswith('"'):
+                    text = text[1:-1].strip()
+                    
+                # Remove meta-commentary or explanations about the response
+                if "This response:" in text:
+                    text = text.split("This response:")[0].strip()
+                
+                # Remove any fabricated customer queries that the model might have hallucinated
+                if "Customer:" in text:
+                    text = text.split("Customer:")[0].strip()
+                
+                # Also check for common dialogue indicators
+                dialogue_markers = ["Customer:", "User:", "Human:", "Person:"]
+                for marker in dialogue_markers:
+                    if marker in text:
+                        text = text.split(marker)[0].strip()
+                
+                # Use first-person language
+                text = text.replace("the dealership", "our dealership")
+                
+                return text
+            else:
+                return "I'm sorry, I'm having trouble accessing our information right now. Can I help you with something else?"
 
         except Exception as e:
             print(f"Error generating response: {str(e)}")
-            return "I apologize, but I'm having trouble processing your request at the moment. Please try again."
+            return "I'm having trouble with our system right now. Can I take your number and have someone call you back?"
 
 # Initialize RAG engine as a singleton
 rag_engine = RAGEngine() 

@@ -2,367 +2,890 @@
 {% load static %}
 
 {% block content %}
-<div class="container mt-5">
-    <div class="row">
-        <div class="col-md-8 mx-auto">
-            <div class="card">
-                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <h3 class="mb-0">AI Voice Assistant</h3>
-                    <div class="d-flex align-items-center">
-                        <span id="call-duration" class="badge badge-light mr-3" style="display: none;">00:00</span>
-                        <span id="listening-indicator" class="badge badge-danger mr-2" style="display: none;">
-                            On Call
-                        </span>
-                        <div id="voice-indicator" class="rounded-circle" 
-                             style="width: 12px; height: 12px; background-color: #dc3545; display: none;"></div>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <!-- Live Transcription -->
-                    <div id="live-transcript" class="alert alert-info mb-3" style="display: none;">
-                        <strong>You:</strong> <span id="current-speech"></span>
-                    </div>
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5" style="margin-top: 100px;">
+            <div class="voice-call-box text-center p-4 shadow rounded bg-white">
+                <!-- Logo (optional, uncomment if you want to show) -->
+                {# <img src="{% static 'img/logo.png' %}" alt="Logo" class="mb-3" style="height: 48px;"> #}
+                <!-- <h3 class="mb-3">Voice Assistant</h3> -->
+                <div id="callStatus" class="mb-2 fw-bold text-success" style="font-size: 1.2rem;">Ready</div>
+                <div id="callTimer" class="mb-3 text-muted" style="font-size: 1.1rem;">00:00</div>
 
-                    <!-- Conversation History -->
-                    <div id="conversation-log" class="mb-4" style="height: 300px; overflow-y: auto; padding: 15px;">
-                        <!-- Conversation history will appear here -->
-                    </div>
-                    
-                    <div class="text-center mb-3">
-                        <div id="status-message" class="text-muted mb-2">
-                            Click "Start Call" to begin conversation
-                        </div>
-                        <div class="btn-group">
-                            <button id="startCallButton" class="btn btn-success">
-                                <i class="fas fa-phone"></i> Start Call
-                            </button>
-                            <button id="endCallButton" class="btn btn-danger" style="display: none;">
-                                <i class="fas fa-phone-slash"></i> End Call
-                            </button>
-                            <button id="muteButton" class="btn btn-warning" style="display: none;">
-                                <i class="fas fa-microphone-slash"></i> Mute
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                <!-- Microphone Button -->
+                <button id="micButton" class="btn btn-light btn-lg rounded-circle shadow mb-3" style="width: 80px; height: 80px;">
+                    <i id="micIcon" class="fa fa-microphone text-primary" style="font-size: 2rem;"></i>
+                </button>
 
-            <!-- Call Transcript Modal -->
-            <div class="modal fade" id="transcriptModal" tabindex="-1" role="dialog">
-                <div class="modal-dialog modal-lg" role="document">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Call Transcript</h5>
-                            <button type="button" class="close" data-dismiss="modal">
-                                <span>&times;</span>
-                            </button>
-                        </div>
-                        <div class="modal-body">
-                            <div id="transcript-content" style="max-height: 400px; overflow-y: auto;">
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-primary" id="downloadTranscript">
-                                Download Transcript
-                            </button>
-                            <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                        </div>
-                    </div>
+                <!-- Processing Indicator -->
+                <div id="processingIndicator" class="mb-3 d-none">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <div class="mt-2">Assistant is processing...</div>
+                </div>
+
+                <!-- Current Response -->
+                <div id="currentResponse" class="mb-3 p-3 bg-light rounded" style="min-height: 60px;">
+                    <span class="text-muted">Waiting for your question...</span>
+                </div>
+
+                <!-- Download Transcript Button -->
+                <button id="downloadTranscript" class="btn btn-outline-primary w-100" disabled>
+                    <i class="fa fa-download"></i> Download Transcript
+                </button>
+
+                <!-- Test API Button (for debugging) -->
+                <button id="testApiButton" class="btn btn-outline-secondary w-100 mt-2">
+                    Test API Connection
+                </button>
+
+                <!-- Microphone Access Message -->
+                <div id="micAccessMsg" class="text-danger mt-3 d-none">
+                    This feature requires microphone access to work.
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-{% block javascript %}
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const startCallButton = document.getElementById('startCallButton');
-        const endCallButton = document.getElementById('endCallButton');
-        const muteButton = document.getElementById('muteButton');
-        const statusMessage = document.getElementById('status-message');
-        const conversationLog = document.getElementById('conversation-log');
-        const liveTranscript = document.getElementById('live-transcript');
-        const currentSpeech = document.getElementById('current-speech');
-        const listeningIndicator = document.getElementById('listening-indicator');
-        const voiceIndicator = document.getElementById('voice-indicator');
-        const callDuration = document.getElementById('call-duration');
-        const transcriptModal = new bootstrap.Modal(document.getElementById('transcriptModal'));
-        
-        let recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-        let synthesis = window.speechSynthesis;
-        
-        // Call state
-        let isOnCall = false;
-        let isMuted = false;
-        let sessionId = null;
-        let callStartTime = null;
-        let durationTimer = null;
-        
-        // Configure recognition
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        let silenceTimer = null;
-        let currentQuery = '';
-        
-        function updateDuration() {
-            if (!callStartTime) return;
-            const duration = Math.floor((Date.now() - callStartTime) / 1000);
-            const minutes = Math.floor(duration / 60).toString().padStart(2, '0');
-            const seconds = (duration % 60).toString().padStart(2, '0');
-            callDuration.textContent = `${minutes}:${seconds}`;
-        }
+<style>
+.voice-call-box {
+    max-width: 400px;
+    width: 100%;
+}
 
-        function startCall() {
-            isOnCall = true;
-            sessionId = Date.now().toString();
-            callStartTime = Date.now();
-            startCallButton.style.display = 'none';
-            endCallButton.style.display = 'inline-block';
-            muteButton.style.display = 'inline-block';
-            callDuration.style.display = 'inline-block';
-            statusMessage.textContent = 'Call connected. Start speaking...';
-            durationTimer = setInterval(updateDuration, 1000);
+/* Add styles for listening indicator */
+.listening-indicator {
+    position: absolute;
+    bottom: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    width: 100px;
+}
+
+.listening-waves {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 20px;
+}
+
+.wave {
+    width: 3px;
+    height: 15px;
+    margin: 0 2px;
+    background-color: #007bff;
+    animation: wave 1s infinite ease-in-out;
+}
+
+.wave:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.wave:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes wave {
+    0%, 100% { height: 5px; }
+    50% { height: 15px; }
+}
+
+.fa-microphone.listening {
+    color: #28a745 !important;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.7; }
+    50% { opacity: 1; }
+    100% { opacity: 0.7; }
+}
+
+/* Add styles for speaking animation */
+#currentResponse.speaking {
+    animation: highlight 2s infinite;
+}
+
+@keyframes highlight {
+    0% { background-color: #f8f9fa; }
+    50% { background-color: #e9ecef; }
+    100% { background-color: #f8f9fa; }
+}
+
+/* Make the mic button position relative for absolute positioning of the indicator */
+#micButton {
+    position: relative;
+}
+</style>
+
+<script>
+let recognition = null;
+let isCallActive = false;
+let callStartTime;
+let callTimer;
+let conversationLog = [];
+let callSessionId;
+let isProcessing = false;
+let lastProcessedText = '';
+let processingTimeout = null;
+let recognitionState = 'inactive'; // Can be 'inactive', 'starting', 'active', 'stopping'
+let recognitionRestartPending = false;
+let lastAssistantMessage = '';
+let isSpeaking = false;
+let listenIndicator = null; // Visual indicator for listening state
+let processingStuckSince = null;
+
+function safeStartRecognition() {
+    // Only start if we're in the right state
+    if (recognitionState === 'inactive' && isCallActive) {
+        try {
+            recognitionState = 'starting';
+            console.log('Starting speech recognition...');
+            
+            // Show visual listening indicator
+            updateListeningIndicator(true);
+            
             recognition.start();
             
-            // Initial greeting from AI
-            fetch('/voice-assistant/process/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ 
-                    session_id: sessionId,
-                    is_call_start: true
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    addToConversation('Assistant', data.response, true);
-                    speak(data.response);
+            // Safety timeout - if recognition doesn't start within 2 seconds, force reinitialize
+            setTimeout(() => {
+                if (recognitionState === 'starting') {
+                    console.error('Recognition failed to start after timeout');
+                    recognitionState = 'inactive';
+                    initializeSpeechRecognition();
+                    safeStartRecognition();
                 }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                statusMessage.textContent = 'Error starting call. Please try again.';
-                endCall();
-            });
+            }, 2000);
+        } catch (e) {
+            console.error('Error starting recognition:', e);
+            recognitionState = 'inactive';
+            updateListeningIndicator(false);
+            // Try to create a new recognition object
+            setTimeout(() => {
+                initializeSpeechRecognition();
+                safeStartRecognition();
+            }, 500);
         }
+    } else {
+        console.log('Not starting recognition. State:', recognitionState, 'Call active:', isCallActive);
+    }
+}
 
-        function endCall() {
-            isOnCall = false;
-            recognition.stop();
-            clearInterval(durationTimer);
-            
-            // Get call transcript
-            fetch('/voice-assistant/process/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ 
-                    session_id: sessionId,
-                    is_call_end: true
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success' && data.is_transcript) {
-                    displayTranscript(data.transcript);
-                }
-            });
-            
-            // Reset UI
-            startCallButton.style.display = 'inline-block';
-            endCallButton.style.display = 'none';
-            muteButton.style.display = 'none';
-            callDuration.style.display = 'none';
-            listeningIndicator.style.display = 'none';
-            voiceIndicator.style.display = 'none';
-            liveTranscript.style.display = 'none';
-            statusMessage.textContent = 'Call ended. Click "Start Call" to begin new conversation';
+function safeStopRecognition() {
+    if (recognitionState === 'active' || recognitionState === 'starting') {
+        recognitionState = 'stopping';
+        console.log('Stopping speech recognition...');
+        updateListeningIndicator(false);
+        try {
+            recognition.abort();
+        } catch (e) {
+            console.log('Error stopping recognition:', e);
+            recognitionState = 'inactive';
         }
+    } else {
+        console.log('Recognition not active, cannot stop. State:', recognitionState);
+        recognitionState = 'inactive';
+    }
+}
 
-        function toggleMute() {
-            isMuted = !isMuted;
-            muteButton.innerHTML = isMuted ? 
-                '<i class="fas fa-microphone"></i> Unmute' : 
-                '<i class="fas fa-microphone-slash"></i> Mute';
-            if (isMuted) {
-                recognition.stop();
-            } else {
-                recognition.start();
+function initializeSpeechRecognition() {
+    // Clean up any existing instance
+    if (recognition) {
+        try {
+            safeStopRecognition();
+            recognition.onstart = null;
+            recognition.onresult = null;
+            recognition.onerror = null;
+            recognition.onend = null;
+        } catch (e) {
+            console.log('Error cleaning up recognition:', e);
+        }
+    }
+
+    // Create fresh instance
+    recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.continuous = false; // Process one utterance at a time
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognitionState = 'inactive';
+
+    recognition.onstart = () => {
+        document.getElementById('micAccessMsg').classList.add('d-none');
+        recognitionState = 'active';
+        console.log('Speech recognition active');
+        
+        // Update call status to show we're listening
+        const callStatusEl = document.getElementById('callStatus');
+        if (callStatusEl && isCallActive) {
+            callStatusEl.textContent = 'Listening...';
+        }
+    };
+
+    let currentTranscript = '';
+
+    recognition.onresult = (event) => {
+        // Only process if we're actively listening
+        if (recognitionState !== 'active' || !isCallActive) return;
+
+        const results = event.results;
+        const result = results[results.length - 1];
+        const transcript = result[0].transcript.trim();
+        
+        console.log('Speech detected:', transcript, 'isFinal:', result.isFinal);
+        currentTranscript = transcript;
+        
+        // Update call status to show we heard something
+        const callStatusEl = document.getElementById('callStatus');
+        if (callStatusEl) {
+            callStatusEl.textContent = 'Hearing you...';
+        }
+        
+        if (result.isFinal && 
+            !isProcessing && 
+            currentTranscript && 
+            currentTranscript !== lastProcessedText) {
+            
+            if (processingTimeout) {
+                clearTimeout(processingTimeout);
+            }
+            
+            processingTimeout = setTimeout(() => {
+                console.log('Processing final transcript:', currentTranscript);
+                lastProcessedText = currentTranscript;
+                processVoiceInput(currentTranscript);
+                currentTranscript = '';
+            }, 300);
+        }
+    };
+
+    recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        
+        if (event.error === 'not-allowed' || event.error === 'denied') {
+            document.getElementById('micAccessMsg').classList.remove('d-none');
+            endCallUI();
+        } else if (event.error === 'aborted') {
+            console.log('Recognition was aborted intentionally');
+            recognitionState = 'inactive';
+        } else {
+            console.warn('Recognition error:', event.error);
+            recognitionState = 'inactive';
+            
+            if (isCallActive && !isProcessing) {
+                console.log('Will try to restart after error');
+                setTimeout(safeStartRecognition, 200); // Reduced from 500ms
             }
         }
+    };
 
-        function displayTranscript(transcript) {
-            const transcriptContent = document.getElementById('transcript-content');
-            transcriptContent.innerHTML = '';
-            
-            transcript.forEach(entry => {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'mb-2';
-                messageDiv.innerHTML = `
-                    <small class="text-muted">${entry.timestamp}</small>
-                    <strong>${entry.speaker}:</strong> ${entry.text}
-                `;
-                transcriptContent.appendChild(messageDiv);
-            });
-            
-            transcriptModal.show();
-        }
-
-        function downloadTranscript() {
-            const transcriptContent = document.getElementById('transcript-content');
-            const text = transcriptContent.innerText;
-            const blob = new Blob([text], { type: 'text/plain' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `call_transcript_${sessionId}.txt`;
-            a.click();
-            window.URL.revokeObjectURL(url);
-        }
-
-        function startVoiceIndicator() {
-            voiceIndicator.style.display = 'block';
-            let opacity = 1;
-            const animate = () => {
-                opacity = opacity === 1 ? 0.3 : 1;
-                voiceIndicator.style.opacity = opacity;
-                if (isOnCall && !isMuted) {
-                    requestAnimationFrame(animate);
-                }
-            };
-            animate();
-        }
-
-        function resetSilenceTimer() {
-            if (silenceTimer) clearTimeout(silenceTimer);
-            silenceTimer = setTimeout(() => {
-                if (currentQuery.trim() && !isMuted) {
-                    processVoiceInput(currentQuery.trim());
-                    currentQuery = '';
-                    liveTranscript.style.display = 'none';
-                }
-            }, 1500);
-        }
+    recognition.onend = () => {
+        console.log('Recognition ended, state:', recognitionState);
         
-        function addToConversation(speaker, text, isSystem = false) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `mb-3 ${speaker === 'You' ? 'text-right' : 'text-left'}`;
-            messageDiv.innerHTML = `
-                <div class="d-inline-block ${isSystem ? 'bg-warning' : (speaker === 'You' ? 'bg-light' : 'bg-primary text-white')} 
-                             rounded p-2" style="max-width: 80%;">
-                    <strong>${speaker}:</strong> ${text}
-                </div>
-            `;
-            conversationLog.appendChild(messageDiv);
-            conversationLog.scrollTop = conversationLog.scrollHeight;
-        }
-        
-        function speak(text) {
-            if (!isOnCall) return;
+        // Only transition to inactive if we're not in the middle of stopping
+        if (recognitionState !== 'stopping') {
+            recognitionState = 'inactive';
             
-            // Stop recognition while assistant is speaking
-            recognition.stop();
+            if (isCallActive && !isProcessing) {
+                console.log('Recognition ended naturally, restarting immediately');
+                safeStartRecognition(); // Immediate restart with no delay
+            }
+        } else {
+            // We were stopping intentionally
+            recognitionState = 'inactive';
+            console.log('Recognition stopped intentionally');
             
-            const utterance = new SpeechSynthesisUtterance(text);
-            
-            // Resume recognition after speaking is done
-            utterance.onend = function() {
-                if (isOnCall && !isMuted) {
-                    recognition.start();
-                }
-            };
-            
-            synthesis.speak(utterance);
-        }
-
-        async function processVoiceInput(text, isSystem = false) {
-            if (!isOnCall) return;
-            
-            try {
-                const response = await fetch('/voice-assistant/process/', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ 
-                        text: text,
-                        session_id: sessionId
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    if (!isSystem && !data.is_assistant_response) {
-                        addToConversation('You', text);
-                    }
-                    if (data.response) {
-                        addToConversation('Assistant', data.response);
-                        speak(data.response);
-                    }
-                } else {
-                    addToConversation('System', data.message || 'Error processing request', true);
-                }
-            } catch (error) {
-                addToConversation('System', 'Error: Could not process request', true);
-                console.error('Error:', error);
+            // Check if restart was requested during stopping
+            if (recognitionRestartPending && isCallActive) {
+                recognitionRestartPending = false;
+                setTimeout(safeStartRecognition, 100); // Reduced delay from 500ms to 100ms
+                console.log('Executing pending restart');
             }
         }
         
-        recognition.onresult = function(event) {
-            if (!isOnCall || isMuted || synthesis.speaking) return;  // Don't process input while assistant is speaking
-            
-            let interimTranscript = '';
-            let finalTranscript = '';
+        // Update call status
+        const callStatusEl = document.getElementById('callStatus');
+        if (callStatusEl && isCallActive && !isProcessing) {
+            callStatusEl.textContent = 'Call Active';
+        }
+    };
+}
 
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcript = event.results[i][0].transcript;
-                if (event.results[i].isFinal) {
-                    finalTranscript += transcript;
-                } else {
-                    interimTranscript += transcript;
-                }
-            }
+function scheduleRecognitionRestart() {
+    if (recognitionState === 'stopping') {
+        // Mark for restart when current stop completes
+        console.log('Recognition is stopping, will restart when stopped');
+        recognitionRestartPending = true;
+        return;
+    }
+    
+    // Stop current recognition if active
+    if (recognitionState === 'active' || recognitionState === 'starting') {
+        safeStopRecognition();
+        setTimeout(safeStartRecognition, 100); // Reduced from 500ms
+    } else {
+        // Safe to start directly
+        safeStartRecognition(); // Immediate start with no delay
+    }
+}
 
-            if (finalTranscript) {
-                currentQuery += ' ' + finalTranscript;
-            }
-            currentSpeech.textContent = currentQuery + interimTranscript;
-            liveTranscript.style.display = 'block';
-            resetSilenceTimer();
-        };
-        
-        recognition.onstart = function() {
-            if (isOnCall && !isMuted) {
-                listeningIndicator.style.display = 'inline';
-                startVoiceIndicator();
-            }
-        };
-        
-        recognition.onerror = function(event) {
-            console.error('Speech recognition error:', event.error);
-            if (event.error !== 'no-speech') {
-                addToConversation('System', `Error: ${event.error}`, true);
-            }
-        };
-        
-        recognition.onend = function() {
-            if (isOnCall && !isMuted) {
-                recognition.start();
-            }
-        };
-
-        // Event listeners
-        startCallButton.addEventListener('click', startCall);
-        endCallButton.addEventListener('click', endCall);
-        muteButton.addEventListener('click', toggleMute);
-        document.getElementById('downloadTranscript').addEventListener('click', downloadTranscript);
+function startCall() {
+    isCallActive = true;
+    callStartTime = new Date();
+    callSessionId = Date.now().toString();
+    lastProcessedText = '';
+    updateCallTimer();
+    
+    const callStatusEl = document.getElementById('callStatus');
+    if (callStatusEl) {
+        callStatusEl.textContent = 'Call Active - Connecting...';
+        callStatusEl.classList.remove('text-danger', 'text-muted');
+        callStatusEl.classList.add('text-success');
+        callStatusEl.classList.remove('d-none'); // Ensure it's visible
+    }
+    
+    document.getElementById('micButton').disabled = false;
+    document.getElementById('micIcon').className = 'fa fa-microphone-slash text-danger';
+    document.getElementById('downloadTranscript').disabled = true;
+    
+    // Initialize and start speech recognition
+    initializeSpeechRecognition();
+    safeStartRecognition();
+    
+    console.log('Sending start call request with session ID:', callSessionId);
+    
+    fetch('/voice-assistant/process/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({ 
+            text: '', 
+            session_id: callSessionId, 
+            is_call_start: true,
+            is_call_end: false 
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Start call response:', data);
+        if (callStatusEl) {
+            callStatusEl.textContent = 'Call Active - Connected';
+        }
+        if (data.response) {
+            updateCurrentResponse(data.response);
+            // Also pass needsProcessingReset=true for initial greeting
+            speakResponse(data.response, true);
+        }
+    })
+    .catch(error => {
+        console.error('Error starting call:', error);
+        updateCurrentResponse("Sorry, I couldn't connect to the server. Please try again.");
+        if (callStatusEl) {
+            callStatusEl.textContent = 'Connection Error';
+            callStatusEl.classList.remove('text-success');
+            callStatusEl.classList.add('text-danger');
+        }
     });
+}
+
+function endCall() {
+    isCallActive = false;
+    clearInterval(callTimer);
+    
+    // Stop speech recognition
+    safeStopRecognition();
+    // Also cancel any speech synthesis in progress
+    window.speechSynthesis.cancel();
+    
+    // Reset flags
+    isSpeaking = false;
+    isProcessing = false;
+    
+    endCallUI();
+    document.getElementById('downloadTranscript').disabled = false;
+    
+    console.log('Sending end call request with session ID:', callSessionId);
+    
+    fetch('/voice-assistant/process/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({ 
+            text: '', 
+            session_id: callSessionId, 
+            is_call_start: false,
+            is_call_end: true 
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('End call response:', data);
+        // If we got a transcript, update UI
+        if (data.transcript && data.is_transcript) {
+            // Could display transcript history if needed
+            console.log('Received transcript data');
+        }
+    })
+    .catch(error => {
+        console.error('Error ending call:', error);
+    });
+}
+
+function endCallUI() {
+    const callStatusEl = document.getElementById('callStatus');
+    if (callStatusEl) {
+        callStatusEl.textContent = 'Call Ended';
+        callStatusEl.classList.remove('text-success');
+        callStatusEl.classList.add('text-danger');
+    }
+    
+    // Remove listening indicator if present
+    updateListeningIndicator(false);
+    
+    // Remove speaking animation if present
+    document.getElementById('currentResponse').classList.remove('speaking');
+    
+    document.getElementById('micButton').disabled = false;
+    document.getElementById('micIcon').className = 'fa fa-microphone text-primary';
+}
+
+function updateCallTimer() {
+    callTimer = setInterval(() => {
+        const now = new Date();
+        const diff = now - callStartTime;
+        const minutes = Math.floor(diff / 60000);
+        const seconds = Math.floor((diff % 60000) / 1000);
+        document.getElementById('callTimer').textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }, 1000);
+}
+
+function processVoiceInput(text) {
+    if (!text.trim()) return;
+    
+    // Check if this is likely an echo of what the assistant just said
+    if (isEchoOfAssistant(text)) {
+        console.log('Echo detected, ignoring input:', text);
+        
+        // Reset processing and restart recognition without processing this input
+        setTimeout(() => {
+            if (isCallActive && !isProcessing && !isSpeaking) {
+                scheduleRecognitionRestart();
+            }
+        }, 100); // Reduced from 500ms
+        
+        return;
+    }
+    
+    // Set processing flag to prevent multiple calls
+    isProcessing = true;
+    safeStopRecognition(); // Stop recognition while processing
+    
+    document.getElementById('processingIndicator').classList.remove('d-none');
+    
+    // Update the call status
+    const callStatusEl = document.getElementById('callStatus');
+    if (callStatusEl) {
+        callStatusEl.textContent = 'Processing...';
+    }
+    
+    console.log('Processing voice input:', text, 'with session ID:', callSessionId);
+    
+    // Add the user message to the conversation log
+    conversationLog.push({
+        speaker: 'user',
+        message: text.trim(),
+        timestamp: new Date().toISOString()
+    });
+    
+    // Update current response to show user's message
+    document.getElementById('currentResponse').innerHTML = 
+        `<div class="mb-2"><strong>You:</strong> ${text.trim()}</div>
+         <div class="mt-2">Assistant is thinking...</div>`;
+    
+    fetch('/voice-assistant/process/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({ 
+            text: text, 
+            session_id: callSessionId, 
+            is_call_start: false, 
+            is_call_end: false 
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Process voice response:', data);
+        document.getElementById('processingIndicator').classList.add('d-none');
+        
+        // Update call status
+        if (callStatusEl) {
+            callStatusEl.textContent = 'Assistant speaking...';
+        }
+        
+        if (data.response) {
+            // Set a flag to reset processing when speech ends
+            const needsProcessingReset = true;
+            updateCurrentResponse(data.response);
+            speakResponse(data.response, needsProcessingReset);
+        } else {
+            // No valid response received, reset processing flag
+            isProcessing = false;
+            
+            // Update call status
+            if (callStatusEl) {
+                callStatusEl.textContent = 'Call Active';
+            }
+            
+            if (isCallActive && !isSpeaking) {
+                scheduleRecognitionRestart();
+            }
+        }
+    })
+    .catch(error => {
+        document.getElementById('processingIndicator').classList.add('d-none');
+        console.error('Error processing voice input:', error);
+        updateCurrentResponse("Sorry, I couldn't process your request. Please try again.");
+        
+        // Update call status
+        if (callStatusEl) {
+            callStatusEl.textContent = 'Call Active - Error';
+        }
+        
+        // Reset processing flag on error
+        isProcessing = false;
+        if (isCallActive && !isSpeaking) {
+            scheduleRecognitionRestart();
+        }
+    });
+}
+
+function updateCurrentResponse(text) {
+    const currentResponse = document.getElementById('currentResponse');
+    currentResponse.innerHTML = `<span>${text}</span>`;
+    conversationLog.push({
+        speaker: 'assistant',
+        message: text,
+        timestamp: new Date().toISOString()
+    });
+}
+
+function speakResponse(text, needsProcessingReset) {
+    // Update last assistant message for echo detection
+    lastAssistantMessage = text.toLowerCase().trim();
+    
+    // Mark as speaking
+    isSpeaking = true;
+    
+    // Stop recognition while speaking
+    safeStopRecognition();
+    updateCurrentResponse(text);
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    
+    // Remove speaking animation when done
+    document.getElementById('currentResponse').classList.add('speaking');
+    
+    // When speaking ends
+    utterance.onend = function() {
+        console.log('Assistant finished speaking');
+        isSpeaking = false;
+        
+        // Reset processing flag if this was part of a voice input process
+        if (needsProcessingReset) {
+            console.log('Resetting processing flag after assistant response');
+            isProcessing = false;
+        }
+        
+        // Remove speaking animation
+        document.getElementById('currentResponse').classList.remove('speaking');
+        
+        // Start listening immediately after speech finishes
+        if (isCallActive && !isProcessing) {
+            console.log('Immediately restarting recognition after speech finished');
+            forceRestartRecognition();
+        } else {
+            console.log('Not restarting recognition. Call active:', isCallActive, 'Processing:', isProcessing);
+        }
+    };
+    
+    // Also handle errors
+    utterance.onerror = function(e) {
+        console.log('Speech synthesis error:', e);
+        isSpeaking = false;
+        
+        // Reset processing flag if this was part of a voice input process
+        if (needsProcessingReset) {
+            console.log('Resetting processing flag after speech error');
+            isProcessing = false;
+        }
+        
+        // Remove speaking animation
+        document.getElementById('currentResponse').classList.remove('speaking');
+        
+        // Start listening immediately
+        if (isCallActive && !isProcessing) {
+            forceRestartRecognition();
+        }
+    };
+    
+    // Add visual feedback for assistant speaking
+    window.speechSynthesis.speak(utterance);
+    
+    // Safety timeout - if speech doesn't complete within 15s, force reset
+    setTimeout(() => {
+        if (isSpeaking) {
+            console.log('Speech timeout - force resetting speech state');
+            isSpeaking = false;
+            
+            // Reset processing flag if this was part of a voice input process
+            if (needsProcessingReset) {
+                console.log('Resetting processing flag after speech timeout');
+                isProcessing = false;
+            }
+            
+            document.getElementById('currentResponse').classList.remove('speaking');
+            if (isCallActive && !isProcessing) {
+                forceRestartRecognition();
+            }
+        }
+    }, 15000);
+    
+    // Additional safety timeout to ensure recognition always restarts
+    // This runs regardless of speech completion status
+    setTimeout(() => {
+        console.log('Safety check: Ensuring recognition is active after assistant response');
+        
+        // Force reset processing flag if it's still set after 16 seconds
+        if (needsProcessingReset && isProcessing) {
+            console.log('Force resetting processing flag that was stuck');
+            isProcessing = false;
+        }
+        
+        if (isCallActive && !isProcessing && !isSpeaking && recognitionState === 'inactive') {
+            console.log('Recognition found inactive after assistant response - force restarting');
+            forceRestartRecognition();
+        }
+    }, 16000);
+}
+
+// Forcibly restart recognition by reinitializing
+function forceRestartRecognition() {
+    console.log('Force restarting recognition, current state:', recognitionState);
+    try {
+        // First completely stop and cleanup
+        safeStopRecognition();
+        
+        // Wait minimal time for cleanup and restart immediately
+        setTimeout(() => {
+            try {
+                // Then reinitialize completely
+                initializeSpeechRecognition();
+                
+                // And start again immediately
+                safeStartRecognition();
+                
+                // Double-check recognition is running after 1 second
+                setTimeout(() => {
+                    if (isCallActive && recognitionState !== 'active' && recognitionState !== 'starting') {
+                        console.log('Recognition still not active after restart attempt, trying one more time');
+                        initializeSpeechRecognition();
+                        safeStartRecognition();
+                    }
+                }, 1000);
+            } catch (innerError) {
+                console.error('Error starting recognition in force restart:', innerError);
+                initializeSpeechRecognition();
+                safeStartRecognition();
+            }
+        }, 100); // Reduced from 300ms to 100ms
+    } catch (e) {
+        console.error('Error in force restart:', e);
+        // Last resort - brute force reinitialize
+        initializeSpeechRecognition();
+        safeStartRecognition();
+    }
+}
+
+// Update visual listening indicator
+function updateListeningIndicator(isListening) {
+    // Remove old indicator if it exists
+    if (listenIndicator) {
+        listenIndicator.remove();
+        listenIndicator = null;
+    }
+    
+    if (isListening) {
+        // Create and add listening indicator
+        listenIndicator = document.createElement('div');
+        listenIndicator.className = 'listening-indicator';
+        listenIndicator.innerHTML = `
+            <div class="listening-waves">
+                <div class="wave"></div>
+                <div class="wave"></div>
+                <div class="wave"></div>
+            </div>
+            <div class="mt-1 text-primary"><small>Listening...</small></div>
+        `;
+        document.getElementById('micButton').appendChild(listenIndicator);
+        document.getElementById('micIcon').classList.add('listening');
+    } else {
+        // Remove listening class
+        document.getElementById('micIcon').classList.remove('listening');
+    }
+}
+
+function isEchoOfAssistant(text) {
+    // Ignore if we don't have a last message
+    if (!lastAssistantMessage) return false;
+    
+    // Normalize both texts
+    const normalizedInput = text.toLowerCase().trim();
+    const normalizedLast = lastAssistantMessage.toLowerCase().trim();
+    
+    // Skip very short inputs
+    if (normalizedInput.length < 4) return false;
+    
+    // Check if user input contains large portions of the assistant's last message
+    // or if they're very similar
+    const similarity = calculateStringSimilarity(normalizedInput, normalizedLast);
+    console.log(`Echo check - Similarity: ${similarity}, Input: "${normalizedInput}", Last: "${normalizedLast}"`);
+    
+    // If similarity is above threshold, it's likely an echo
+    return similarity > 0.7; // 70% similarity threshold
+}
+
+function calculateStringSimilarity(str1, str2) {
+    // Simple function to calculate similarity between two strings
+    // Returns value between 0 (completely different) and 1 (identical)
+    
+    // If either string is empty
+    if (!str1.length || !str2.length) return 0;
+    
+    // Check if one string contains the other
+    if (str1.includes(str2) || str2.includes(str1)) {
+        const longerLength = Math.max(str1.length, str2.length);
+        const shorterLength = Math.min(str1.length, str2.length);
+        return shorterLength / longerLength;
+    }
+    
+    // Count common words
+    const words1 = str1.split(/\s+/);
+    const words2 = str2.split(/\s+/);
+    let commonWords = 0;
+    
+    for (const word of words1) {
+        if (word.length < 3) continue; // Skip very short words
+        if (words2.includes(word)) {
+            commonWords++;
+        }
+    }
+    
+    // Calculate similarity based on word overlap
+    const totalUniqueWords = new Set([...words1, ...words2]).size;
+    return commonWords / totalUniqueWords;
+}
+
+function downloadTranscript() {
+    const transcript = conversationLog.map(log => {
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        return `[${time}] ${log.speaker.toUpperCase()}: ${log.message}`;
+    }).join('\n\n');
+    const blob = new Blob([transcript], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `call-transcript-${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+}
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+document.getElementById('micButton').addEventListener('click', function() {
+    console.log('Microphone button clicked. Current state:', isCallActive ? 'Active' : 'Inactive');
+    if (!isCallActive) {
+        startCall();
+    } else {
+        endCall();
+    }
+});
+document.getElementById('downloadTranscript').addEventListener('click', downloadTranscript);
+
+document.getElementById('testApiButton').addEventListener('click', function() {
+    fetch('/voice-assistant/test-api/')
+        .then(response => response.json())
+        .then(data => {
+            alert('API Test Result: ' + JSON.stringify(data));
+            console.log('API Test Result:', data);
+        })
+        .catch(error => {
+            alert('API Test Failed: ' + error);
+            console.error('API Test Error:', error);
+        });
+});
+
+// Add periodic check for stuck states
+setInterval(() => {
+    if (isCallActive) {
+        // If processing has been true for more than 20 seconds, it's probably stuck
+        if (isProcessing && processingStuckSince === null) {
+            processingStuckSince = Date.now();
+        } else if (isProcessing && processingStuckSince !== null) {
+            const stuckTime = Date.now() - processingStuckSince;
+            if (stuckTime > 20000) { // 20 seconds
+                console.log('Processing state appears stuck for', stuckTime/1000, 'seconds - resetting');
+                isProcessing = false;
+                processingStuckSince = null;
+                
+                // Also unstick recognition if needed
+                if (recognitionState !== 'active' && !isSpeaking) {
+                    console.log('Attempting to restart recognition after unsticking processing state');
+                    forceRestartRecognition();
+                }
+            }
+        } else {
+            processingStuckSince = null;
+        }
+    }
+}, 5000);
 </script>
-{% endblock %}
 {% endblock %} 
