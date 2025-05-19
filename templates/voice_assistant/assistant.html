@@ -18,6 +18,7 @@
 <div class="container py-5">
     <div class="row justify-content-center">
         <div class="col-md-6 col-lg-5" style="margin-top: 100px;">
+            {% if user.is_authenticated %}
             <div class="voice-call-box text-center p-4 shadow rounded bg-white">
                 <!-- Logo (optional, uncomment if you want to show) -->
                 {# <img src="{% static 'img/logo.png' %}" alt="Logo" class="mb-3" style="height: 48px;"> #}
@@ -48,15 +49,22 @@
                 </button>
 
                 <!-- Test API Button (for debugging) -->
-                <button id="testApiButton" class="btn btn-outline-secondary w-100 mt-2">
+                <!-- <button id="testApiButton" class="btn btn-outline-secondary w-100 mt-2">
                     Test API Connection
-                </button>
+                </button> -->
 
                 <!-- Microphone Access Message -->
                 <div id="micAccessMsg" class="text-danger mt-3 d-none">
                     This feature requires microphone access to work.
                 </div>
             </div>
+            {% else %}
+            <div class="text-center p-4 shadow rounded bg-white">
+                <h3 class="mb-3">Authentication Required</h3>
+                <p class="mb-4">Please log in to access the voice assistant.</p>
+                <a href="{% url 'login' %}" class="btn btn-primary">Log In</a>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -391,7 +399,7 @@
 
         console.log('Sending start call request with session ID:', callSessionId);
 
-        fetch('/voice-assistant/process/', {
+        fetch('/talk-to-ai/process/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -450,7 +458,7 @@
 
         console.log('Sending end call request with session ID:', callSessionId);
 
-        fetch('/voice-assistant/process/', {
+        fetch('/talk-to-ai/process/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -553,7 +561,7 @@
             `<div class="mb-2"><strong>You:</strong> ${text.trim()}</div>
          <div class="mt-2">Assistant is thinking...</div>`;
 
-        fetch('/voice-assistant/process/', {
+        fetch('/talk-to-ai/process/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -888,7 +896,7 @@
     document.getElementById('downloadTranscript').addEventListener('click', downloadTranscript);
 
     document.getElementById('testApiButton').addEventListener('click', function () {
-        fetch('/voice-assistant/test-api/')
+        fetch('/talk-to-ai/test-api/')
             .then(response => response.json())
             .then(data => {
                 alert('API Test Result: ' + JSON.stringify(data));
