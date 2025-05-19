@@ -3,6 +3,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.utils import timezone
+from django.contrib.auth.decorators import login_required
 import json
 import asyncio
 from .models import Conversation, CallSession
@@ -13,10 +14,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+@login_required
 def voice_assistant(request):
     """Render the voice assistant interface"""
     return render(request, 'voice_assistant/assistant.html')
 
+@login_required
 @csrf_exempt
 def test_api(request):
     """Simple test endpoint to verify API functionality"""
@@ -27,6 +30,7 @@ def test_api(request):
         'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
     })
 
+@login_required
 @csrf_exempt
 def process_voice(request):
     """Process voice input and return AI response"""

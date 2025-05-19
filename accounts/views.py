@@ -16,7 +16,13 @@ def login(request):
         if user is not None:
             auth.login(request, user)
             messages.success(request, 'You are now logged in.')
-            return redirect('dashboard')
+            
+            # Check if there's a next parameter in the request
+            next_url = request.POST.get('next', '')
+            if next_url:
+                return redirect(next_url)
+            else:
+                return redirect('dashboard')
         else:
             messages.error(request, 'Invalid login credentials')
             return redirect('login')
