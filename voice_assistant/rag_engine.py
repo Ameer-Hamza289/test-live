@@ -7,6 +7,16 @@ import numpy as np
 from dotenv import load_dotenv
 import json
 import google.generativeai as genai
+import django
+from django.conf import settings
+
+# Configure Django settings if not already configured
+if not settings.configured:
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'cardealer.settings')
+    django.setup()
+
+from cars.models import Car
+from django.db import models
 
 load_dotenv()
 
@@ -22,22 +32,8 @@ encoder = SentenceTransformer('all-MiniLM-L6-v2')
 
 class RAGEngine:
     def __init__(self):
-        # Initialize knowledge base with detailed car dealership information
-        self.knowledge_base = [
-            # Vehicle Inventory
-            "Our new vehicle inventory includes latest models from Toyota, Honda, Ford, and Chevrolet, featuring sedans, SUVs, trucks, and hybrid vehicles.",
-            "Popular sedan models include Toyota Camry, Honda Accord, and Ford Fusion, starting from $25,000.",
-            "Our SUV lineup features Toyota RAV4, Honda CR-V, Ford Explorer, and Chevrolet Tahoe, with prices ranging from $28,000 to $55,000.",
-            "We stock a variety of trucks including Ford F-150, Chevrolet Silverado, and Toyota Tundra, perfect for both work and personal use.",
-            "Our hybrid and electric vehicle selection includes Toyota Prius, Honda Insight, and Ford Mustang Mach-E.",
-            
-            # Used Cars
-            "All our used vehicles undergo a comprehensive 150-point inspection and come with a detailed vehicle history report.",
-            "We offer certified pre-owned vehicles from major manufacturers with extended warranty coverage.",
-            "Our used car inventory is priced competitively, with options starting under $15,000.",
-            "Every used vehicle comes with a 7-day/500-mile money-back guarantee.",
-            "We regularly update our used car inventory with quality vehicles under 5 years old and less than 60,000 miles.",
-            
+        # Base knowledge base with dealership information (non-car specific)
+        self.base_knowledge = [
             # Financing Options
             "We offer competitive financing rates starting from 2.9% APR for qualified buyers.",
             "Special financing programs available for first-time buyers and college graduates with rates from 3.9% APR.",
@@ -85,6 +81,9 @@ class RAGEngine:
             "Powertrain warranty coverage up to 10 years/100,000 miles available.",
             
             # Additional Services
+            "All our used vehicles undergo a comprehensive 150-point inspection and come with a detailed vehicle history report.",
+            "We offer certified pre-owned vehicles from major manufacturers with extended warranty coverage.",
+            "Every used vehicle comes with a 7-day/500-mile money-back guarantee.",
             "Free vehicle history reports for all used cars.",
             "Complimentary vehicle appraisals for trade-ins.",
             "Online inventory search with detailed vehicle specifications and photos.",
@@ -92,25 +91,184 @@ class RAGEngine:
             "Assistance with vehicle registration and insurance.",
         ]
         
-        # Create FAISS index for fast similarity search
+        # Session-based caching for car inventory
+        self.session_cache = {}
+        self.current_session_id = None
+        self.knowledge_base = None
+        self.embeddings = None
+        self.index = None
+        
+        # Initialize with base knowledge only (no car data yet)
+        self.initialize_base_index()
+
+    def initialize_base_index(self):
+        """Initialize FAISS index with base knowledge only (no car inventory yet)."""
+        self.knowledge_base = self.base_knowledge.copy()
         self.embeddings = encoder.encode(self.knowledge_base)
         self.dimension = self.embeddings.shape[1]
         self.index = faiss.IndexFlatL2(self.dimension)
         self.index.add(self.embeddings.astype('float32'))
 
-    def get_relevant_context(self, query: str, k: int = 5) -> str:
+    def get_or_create_session_context(self, session_id=None):
+        """Get cached car inventory context for session, or create if not exists."""
+        # If no session provided, use global context (refresh each time)
+        if not session_id:
+            return self.get_car_inventory_context()
+        
+        # Check if we have cached context for this session
+        if session_id in self.session_cache:
+            print(f"Using cached car inventory for session: {session_id}")
+            return self.session_cache[session_id]
+        
+        # Create new context for this session
+        print(f"Creating new car inventory context for session: {session_id}")
+        car_context = self.get_car_inventory_context()
+        self.session_cache[session_id] = car_context
+        
+        # Clean up old sessions (keep only last 10 sessions to prevent memory bloat)
+        if len(self.session_cache) > 10:
+            oldest_session = next(iter(self.session_cache))
+            del self.session_cache[oldest_session]
+            print(f"Cleaned up old session cache: {oldest_session}")
+        
+        return car_context
+
+    def update_knowledge_base_for_session(self, session_id=None):
+        """Update the knowledge base with car inventory for specific session."""
+        # Get car inventory (cached for session or fresh)
+        car_inventory = self.get_or_create_session_context(session_id)
+        
+        # Only rebuild if session changed or if we don't have current knowledge base
+        if (self.current_session_id != session_id or 
+            self.knowledge_base is None or 
+            len(self.knowledge_base) == len(self.base_knowledge)):  # No car data yet
+            
+            print(f"Rebuilding knowledge base for session: {session_id}")
+            
+            # Combine base knowledge with current inventory
+            self.knowledge_base = self.base_knowledge + car_inventory
+            
+            # Recreate FAISS index with updated knowledge
+            self.embeddings = encoder.encode(self.knowledge_base)
+            self.dimension = self.embeddings.shape[1]
+            self.index = faiss.IndexFlatL2(self.dimension)
+            self.index.add(self.embeddings.astype('float32'))
+            
+            # Update current session tracking
+            self.current_session_id = session_id
+        else:
+            print(f"Using existing knowledge base for session: {session_id}")
+
+    def refresh_session_inventory(self, session_id):
+        """Force refresh car inventory for a specific session (use when inventory changes)."""
+        if session_id in self.session_cache:
+            del self.session_cache[session_id]
+            print(f"Refreshed inventory cache for session: {session_id}")
+        # Next call to get_or_create_session_context will fetch fresh data
+
+    def clear_session_cache(self, session_id=None):
+        """Clear cache for specific session or all sessions."""
+        if session_id:
+            if session_id in self.session_cache:
+                del self.session_cache[session_id]
+                print(f"Cleared cache for session: {session_id}")
+        else:
+            self.session_cache.clear()
+            self.current_session_id = None
+            print("Cleared all session caches")
+
+    def get_car_inventory_context(self):
+        """Fetch current car inventory from database and convert to context strings."""
+        try:
+            cars = Car.objects.all()
+            car_contexts = []
+            
+            # Group cars by model for better organization
+            car_models = {}
+            for car in cars:
+                model_key = f"{car.model} {car.year}".strip()
+                if model_key not in car_models:
+                    car_models[model_key] = []
+                car_models[model_key].append(car)
+            
+            # Create context for inventory overview
+            if cars.exists():
+                total_cars = cars.count()
+                featured_cars = cars.filter(is_featured=True).count()
+                models_available = set(car.model for car in cars)
+                years_range = f"{cars.aggregate(min_year=models.Min('year'), max_year=models.Max('year'))['min_year']}-{cars.aggregate(min_year=models.Min('year'), max_year=models.Max('year'))['max_year']}"
+                
+                car_contexts.append(f"We currently have {total_cars} vehicles in our inventory, with {featured_cars} featured vehicles.")
+                car_contexts.append(f"Available models include: {', '.join(sorted(models_available))}.")
+                car_contexts.append(f"Our inventory spans model years from {years_range}.")
+            
+            # Create detailed context for each car
+            for car in cars[:20]:  # Limit to first 20 cars to avoid too much context
+                # Handle MultiSelectField features properly
+                if hasattr(car.features, '__iter__') and not isinstance(car.features, str):
+                    # If it's iterable (list-like), join it
+                    features_text = ', '.join(car.features) if car.features else 'standard features'
+                elif isinstance(car.features, str):
+                    # If it's a string, split it
+                    features_list = car.features.split(',') if car.features else []
+                    features_text = ', '.join(features_list) if features_list else 'standard features'
+                else:
+                    features_text = 'standard features'
+                
+                car_context = f"{car.car_title}: {car.year} {car.model} in {car.color}, priced at ${car.price:,}. "
+                car_context += f"This {car.condition} vehicle has {car.miles:,} miles, {car.engine} engine, {car.transmission} transmission, "
+                car_context += f"{car.doors} doors, seats {car.passengers} passengers, and features {features_text}. "
+                car_context += f"Fuel type: {car.fuel_type}, Located in {car.city}, {car.state}."
+                
+                if car.is_featured:
+                    car_context += " This is a FEATURED vehicle with special pricing."
+                
+                car_contexts.append(car_context)
+            
+            # Add summary information about different categories
+            if cars.exists():
+                # Price ranges
+                price_ranges = {
+                    'under_20k': cars.filter(price__lt=20000).count(),
+                    '20k_to_30k': cars.filter(price__gte=20000, price__lt=30000).count(),
+                    '30k_to_50k': cars.filter(price__gte=30000, price__lt=50000).count(),
+                    'over_50k': cars.filter(price__gte=50000).count(),
+                }
+                
+                price_context = "Price ranges in our inventory: "
+                if price_ranges['under_20k'] > 0:
+                    price_context += f"{price_ranges['under_20k']} vehicles under $20,000, "
+                if price_ranges['20k_to_30k'] > 0:
+                    price_context += f"{price_ranges['20k_to_30k']} vehicles $20,000-$30,000, "
+                if price_ranges['30k_to_50k'] > 0:
+                    price_context += f"{price_ranges['30k_to_50k']} vehicles $30,000-$50,000, "
+                if price_ranges['over_50k'] > 0:
+                    price_context += f"{price_ranges['over_50k']} vehicles over $50,000."
+                
+                car_contexts.append(price_context.rstrip(', ') + ".")
+            
+            return car_contexts
+            
+        except Exception as e:
+            print(f"Error fetching car inventory: {str(e)}")
+            return ["We have a variety of quality vehicles available. Please visit our showroom or contact us for current inventory."]
+
+    def get_relevant_context(self, query: str, session_id: str = None, k: int = 5) -> str:
         """Retrieve relevant context from knowledge base using similarity search."""
+        # Update knowledge base for this specific session (uses cache if available)
+        self.update_knowledge_base_for_session(session_id)
+        
         query_vector = encoder.encode([query])[0].reshape(1, -1).astype('float32')
         distances, indices = self.index.search(query_vector, k)
         
         relevant_docs = [self.knowledge_base[i] for i in indices[0]]
         return "\n".join(relevant_docs)
 
-    async def get_response(self, query: str, conversation_history: List[Dict] = None) -> str:
+    async def get_response(self, query: str, conversation_history: List[Dict] = None, session_id: str = None) -> str:
         """Generate response using Google Gemini with RAG-enhanced context."""
         try:
-            # Get relevant context from knowledge base
-            context = self.get_relevant_context(query)
+            # Get relevant context from knowledge base (with session-based caching)
+            context = self.get_relevant_context(query, session_id)
             
             # Prepare conversation history
             history_text = ""

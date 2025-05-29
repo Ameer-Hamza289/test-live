@@ -26,3 +26,25 @@ class Conversation(models.Model):
 
     class Meta:
         ordering = ['timestamp']
+
+class CallFeedback(models.Model):
+    RATING_CHOICES = [
+        (1, '1 - Very Poor'),
+        (2, '2 - Poor'),
+        (3, '3 - Average'),
+        (4, '4 - Good'),
+        (5, '5 - Excellent'),
+    ]
+    
+    session = models.OneToOneField(CallSession, on_delete=models.CASCADE, related_name='feedback')
+    rating = models.IntegerField(choices=RATING_CHOICES)
+    comments = models.TextField(blank=True, null=True)
+    helpful_aspects = models.TextField(blank=True, null=True, help_text="What was most helpful about this call?")
+    improvement_suggestions = models.TextField(blank=True, null=True, help_text="What could be improved?")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return f"Feedback for {self.session.session_id} - Rating: {self.rating}/5"
+
+    class Meta:
+        ordering = ['-created_at']
