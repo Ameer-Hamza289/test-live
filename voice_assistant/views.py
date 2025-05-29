@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.contrib.auth.decorators import login_required
 import json
 import asyncio
-from .models import Conversation, CallSession
+from .models import Conversation, CallSession, CallFeedback
 from django.core.exceptions import ObjectDoesNotExist
 from .rag_engine import rag_engine
 import os
@@ -29,6 +29,66 @@ def test_api(request):
         'method': request.method,
         'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
     })
+
+@login_required
+@csrf_exempt
+def submit_feedback(request):
+    """Submit feedback for a completed call session"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            session_id = data.get('session_id')
+            rating = data.get('rating')
+            comments = data.get('comments', '')
+            helpful_aspects = data.get('helpful_aspects', '')
+            improvement_suggestions = data.get('improvement_suggestions', '')
+            
+            if not session_id or not rating:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Session ID and rating are required'
+                }, status=400)
+            
+            try:
+                session = CallSession.objects.get(session_id=session_id)
+            except ObjectDoesNotExist:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Call session not found'
+                }, status=404)
+            
+            # Check if feedback already exists
+            feedback, created = CallFeedback.objects.get_or_create(
+                session=session,
+                defaults={
+                    'rating': rating,
+                    'comments': comments,
+                    'helpful_aspects': helpful_aspects,
+                    'improvement_suggestions': improvement_suggestions,
+                }
+            )
+            
+            if not created:
+                # Update existing feedback
+                feedback.rating = rating
+                feedback.comments = comments
+                feedback.helpful_aspects = helpful_aspects
+                feedback.improvement_suggestions = improvement_suggestions
+                feedback.save()
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Thank you for your feedback!',
+                'feedback_id': feedback.id
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e)
+            }, status=500)
+    
+    return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=400)
 
 @login_required
 @csrf_exempt
@@ -105,6 +165,9 @@ def process_voice(request):
                     session.duration = session.end_time - session.start_time
                     session.save()
                 
+                # Clean up session cache for this call
+                rag_engine.clear_session_cache(session_id)
+                
                 # Get transcript
                 messages = session.messages.all()
                 transcript = [{
@@ -115,8 +178,11 @@ def process_voice(request):
                 
                 return JsonResponse({
                     'status': 'success',
-                    'is_transcript': True,
-                    'transcript': transcript
+                    'is_call_ended': True,
+                    'session_id': session_id,
+                    'transcript': transcript,
+                    'request_feedback': True,
+                    'message': 'Call ended. Please provide your feedback.'
                 })
             
             # Regular message processing
@@ -148,11 +214,11 @@ def process_voice(request):
             } for msg in recent_messages]
             
             try:
-                # Get AI response using RAG-enhanced Gemini
+                # Get AI response using RAG-enhanced Gemini with session-based caching
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 ai_response = loop.run_until_complete(
-                    rag_engine.get_response(user_input, conversation_history)
+                    rag_engine.get_response(user_input, conversation_history, session_id)
                 )
                 loop.close()
                 
@@ -182,6 +248,37 @@ def process_voice(request):
                     'is_assistant_response': True
                 })
             
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e)
+            }, status=500)
+    
+    return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=400)
+
+@login_required
+@csrf_exempt
+def refresh_inventory(request):
+    """Refresh car inventory cache for a specific session (optional endpoint)"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            session_id = data.get('session_id')
+            
+            if session_id:
+                rag_engine.refresh_session_inventory(session_id)
+                return JsonResponse({
+                    'status': 'success',
+                    'message': f'Inventory cache refreshed for session {session_id}'
+                })
+            else:
+                # Refresh global cache
+                rag_engine.clear_session_cache()
+                return JsonResponse({
+                    'status': 'success',
+                    'message': 'All inventory caches cleared'
+                })
+                
         except Exception as e:
             return JsonResponse({
                 'status': 'error',
