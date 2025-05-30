@@ -9,6 +9,7 @@ import json
 import google.generativeai as genai
 import django
 from django.conf import settings
+from asgiref.sync import sync_to_async
 
 # Configure Django settings if not already configured
 if not settings.configured:
@@ -65,8 +66,8 @@ class RAGEngine:
             # Business Hours & Location
             "Sales department hours: Monday-Saturday 9 AM to 7 PM, Sunday 11 AM to 5 PM.",
             "Service center hours: Monday-Friday 7 AM to 7 PM, Saturday 8 AM to 5 PM.",
-            "Conveniently located at the intersection of Main Street and Commerce Boulevard.",
-            "Easy access from both I-95 and Route 1.",
+            "We are located in University of Education, Lahore, Pakistan.",
+            "Reference points include Township and College Road.",
             
             # Test Drive Policy
             "Test drives available 7 days a week with prior appointment.",
@@ -109,41 +110,36 @@ class RAGEngine:
         self.index = faiss.IndexFlatL2(self.dimension)
         self.index.add(self.embeddings.astype('float32'))
 
-    def get_or_create_session_context(self, session_id=None):
+    async def get_or_create_session_context(self, session_id=None):
         """Get cached car inventory context for session, or create if not exists."""
         # If no session provided, use global context (refresh each time)
         if not session_id:
-            return self.get_car_inventory_context()
+            return await self.get_car_inventory_context()
         
         # Check if we have cached context for this session
         if session_id in self.session_cache:
-            print(f"Using cached car inventory for session: {session_id}")
             return self.session_cache[session_id]
         
         # Create new context for this session
-        print(f"Creating new car inventory context for session: {session_id}")
-        car_context = self.get_car_inventory_context()
+        car_context = await self.get_car_inventory_context()
         self.session_cache[session_id] = car_context
         
         # Clean up old sessions (keep only last 10 sessions to prevent memory bloat)
         if len(self.session_cache) > 10:
             oldest_session = next(iter(self.session_cache))
             del self.session_cache[oldest_session]
-            print(f"Cleaned up old session cache: {oldest_session}")
         
         return car_context
 
-    def update_knowledge_base_for_session(self, session_id=None):
+    async def update_knowledge_base_for_session(self, session_id=None):
         """Update the knowledge base with car inventory for specific session."""
         # Get car inventory (cached for session or fresh)
-        car_inventory = self.get_or_create_session_context(session_id)
+        car_inventory = await self.get_or_create_session_context(session_id)
         
         # Only rebuild if session changed or if we don't have current knowledge base
         if (self.current_session_id != session_id or 
             self.knowledge_base is None or 
             len(self.knowledge_base) == len(self.base_knowledge)):  # No car data yet
-            
-            print(f"Rebuilding knowledge base for session: {session_id}")
             
             # Combine base knowledge with current inventory
             self.knowledge_base = self.base_knowledge + car_inventory
@@ -156,8 +152,6 @@ class RAGEngine:
             
             # Update current session tracking
             self.current_session_id = session_id
-        else:
-            print(f"Using existing knowledge base for session: {session_id}")
 
     def refresh_session_inventory(self, session_id):
         """Force refresh car inventory for a specific session (use when inventory changes)."""
@@ -177,6 +171,7 @@ class RAGEngine:
             self.current_session_id = None
             print("Cleared all session caches")
 
+    @sync_to_async
     def get_car_inventory_context(self):
         """Fetch current car inventory from database and convert to context strings."""
         try:
@@ -193,14 +188,12 @@ class RAGEngine:
             
             # Create context for inventory overview
             if cars.exists():
-                total_cars = cars.count()
-                featured_cars = cars.filter(is_featured=True).count()
                 models_available = set(car.model for car in cars)
                 years_range = f"{cars.aggregate(min_year=models.Min('year'), max_year=models.Max('year'))['min_year']}-{cars.aggregate(min_year=models.Min('year'), max_year=models.Max('year'))['max_year']}"
                 
-                car_contexts.append(f"We currently have {total_cars} vehicles in our inventory, with {featured_cars} featured vehicles.")
-                car_contexts.append(f"Available models include: {', '.join(sorted(models_available))}.")
-                car_contexts.append(f"Our inventory spans model years from {years_range}.")
+                car_contexts.append(f"We have a great selection of vehicles available in our showroom.")
+                car_contexts.append(f"Our current lineup includes: {', '.join(sorted(models_available))}.")
+                car_contexts.append(f"Model years range from {years_range}.")
             
             # Create detailed context for each car
             for car in cars[:20]:  # Limit to first 20 cars to avoid too much context
@@ -225,27 +218,23 @@ class RAGEngine:
                 
                 car_contexts.append(car_context)
             
-            # Add summary information about different categories
+            # Add summary information about different categories without specific counts
             if cars.exists():
-                # Price ranges
-                price_ranges = {
-                    'under_20k': cars.filter(price__lt=20000).count(),
-                    '20k_to_30k': cars.filter(price__gte=20000, price__lt=30000).count(),
-                    '30k_to_50k': cars.filter(price__gte=30000, price__lt=50000).count(),
-                    'over_50k': cars.filter(price__gte=50000).count(),
-                }
+                # Price ranges - just mention ranges without counts
+                has_budget = cars.filter(price__lt=30000).exists()
+                has_mid_range = cars.filter(price__gte=30000, price__lt=50000).exists()
+                has_luxury = cars.filter(price__gte=50000).exists()
                 
-                price_context = "Price ranges in our inventory: "
-                if price_ranges['under_20k'] > 0:
-                    price_context += f"{price_ranges['under_20k']} vehicles under $20,000, "
-                if price_ranges['20k_to_30k'] > 0:
-                    price_context += f"{price_ranges['20k_to_30k']} vehicles $20,000-$30,000, "
-                if price_ranges['30k_to_50k'] > 0:
-                    price_context += f"{price_ranges['30k_to_50k']} vehicles $30,000-$50,000, "
-                if price_ranges['over_50k'] > 0:
-                    price_context += f"{price_ranges['over_50k']} vehicles over $50,000."
+                price_ranges = []
+                if has_budget:
+                    price_ranges.append("budget-friendly options under $30,000")
+                if has_mid_range:
+                    price_ranges.append("mid-range vehicles $30,000-$50,000")
+                if has_luxury:
+                    price_ranges.append("luxury vehicles over $50,000")
                 
-                car_contexts.append(price_context.rstrip(', ') + ".")
+                if price_ranges:
+                    car_contexts.append(f"We offer {', '.join(price_ranges)}.")
             
             return car_contexts
             
@@ -253,22 +242,24 @@ class RAGEngine:
             print(f"Error fetching car inventory: {str(e)}")
             return ["We have a variety of quality vehicles available. Please visit our showroom or contact us for current inventory."]
 
-    def get_relevant_context(self, query: str, session_id: str = None, k: int = 5) -> str:
+    async def get_relevant_context(self, query: str, session_id: str = None, k: int = 5) -> str:
         """Retrieve relevant context from knowledge base using similarity search."""
         # Update knowledge base for this specific session (uses cache if available)
-        self.update_knowledge_base_for_session(session_id)
+        await self.update_knowledge_base_for_session(session_id)
         
         query_vector = encoder.encode([query])[0].reshape(1, -1).astype('float32')
         distances, indices = self.index.search(query_vector, k)
         
         relevant_docs = [self.knowledge_base[i] for i in indices[0]]
-        return "\n".join(relevant_docs)
+        context = "\n".join(relevant_docs)
+
+        return context
 
     async def get_response(self, query: str, conversation_history: List[Dict] = None, session_id: str = None) -> str:
         """Generate response using Google Gemini with RAG-enhanced context."""
         try:
             # Get relevant context from knowledge base (with session-based caching)
-            context = self.get_relevant_context(query, session_id)
+            context = await self.get_relevant_context(query, session_id)
             
             # Prepare conversation history
             history_text = ""
@@ -283,12 +274,21 @@ class RAGEngine:
             system_prompt = """You are a car dealership AI assistant named CarBot. Be helpful, friendly, and concise.
 You have access to information about our dealership's inventory, services, financing options, and more.
 Keep your responses professional but conversational, direct, and to the point - like a helpful dealership employee.
-EXTREMELY IMPORTANT:
+
+IMPORTANT GUIDELINES:
 1. Answer the customer's query ONLY - do not invent additional dialogue or future conversation
 2. Do not add hypothetical "Customer:" messages or responses in your answer
 3. Do not add any text after your answer
 4. Do not provide sample conversations
-5. Respond directly to the current query only, as if you were speaking to the customer right now"""
+5. Respond directly to the current query only, as if you were speaking to the customer right now
+
+PROFESSIONAL COMMUNICATION:
+- Never mention specific inventory counts or numbers (avoid "we have 4 cars", "currently have X vehicles")
+- Instead of counting, focus on describing available models and options
+- Avoid phrases that indicate platform limitations
+- Sound confident and professional like a real dealership salesperson
+- Use phrases like "we offer", "available models include", "you can choose from"
+- Present vehicles as readily available without mentioning quantity limitations"""
 
             # Format the entire prompt
             prompt = f"{system_prompt}\n\n"
