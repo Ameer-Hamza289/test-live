@@ -62,9 +62,18 @@ def register(request):
 
 @login_required(login_url = 'login')
 def dashboard(request):
-    user_inquiry = Contact.objects.order_by('-create_date').filter(email=request.user.email)
-    # count = Contact.objects.order_by('-create_date').filter(user_id=request.user.id).count()
-
+    # Filter contacts by user_id for authenticated users
+    user_inquiry = Contact.objects.order_by('-create_date').filter(user_id=request.user.id)
+    
+    # Debug logging
+    print(f"🔍 Dashboard for user ID: {request.user.id}")
+    print(f"🔍 User email: {request.user.email}")
+    print(f"🔍 Found {user_inquiry.count()} inquiries for this user")
+    
+    # Log some details about found inquiries
+    for inquiry in user_inquiry[:5]:  # Show first 5
+        print(f"   - Inquiry ID: {inquiry.id}, Car: {inquiry.car_title}, Date: {inquiry.create_date}")
+    
     data = {
         'inquiries': user_inquiry,
     }

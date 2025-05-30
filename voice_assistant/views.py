@@ -11,6 +11,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from .rag_engine import rag_engine
 import os
 from dotenv import load_dotenv
+from cars.models import Car
+from datetime import datetime
 
 load_dotenv()
 
@@ -217,6 +219,7 @@ def process_voice(request):
                 # Get AI response using RAG-enhanced Gemini with session-based caching
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
+                
                 ai_response = loop.run_until_complete(
                     rag_engine.get_response(user_input, conversation_history, session_id)
                 )
@@ -286,3 +289,103 @@ def refresh_inventory(request):
             }, status=500)
     
     return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=400)
+
+@login_required
+@csrf_exempt
+def test_cars_database(request):
+    """Test endpoint to check car database and add sample cars if needed"""
+    car_count = Car.objects.count()
+    
+    if car_count == 0:
+        # Add sample cars for testing
+        sample_cars = [
+            {
+                'car_title': '2023 Honda Accord Hybrid',
+                'state': 'CA',
+                'city': 'Los Angeles',
+                'color': 'Silver',
+                'model': 'Honda Accord',
+                'year': 2023,
+                'condition': 'New',
+                'price': 32000,
+                'description': 'Fuel efficient hybrid sedan with advanced safety features',
+                'features': 'Cruise Control,Air Conditioning,Bluetooth Handset,Airbags',
+                'body_style': 'Sedan',
+                'engine': '2.0L Hybrid',
+                'transmission': 'CVT',
+                'interior': 'Cloth',
+                'miles': 15,
+                'doors': '4',
+                'passengers': 5,
+                'vin_no': 'HONDA123456789',
+                'milage': 48,
+                'fuel_type': 'Hybrid',
+                'no_of_owners': '1',
+                'is_featured': True,
+            },
+            {
+                'car_title': '2022 Honda CR-V',
+                'state': 'CA',
+                'city': 'Los Angeles',
+                'color': 'White',
+                'model': 'Honda CR-V',
+                'year': 2022,
+                'condition': 'Used',
+                'price': 28000,
+                'description': 'Reliable SUV with excellent safety ratings',
+                'features': 'Cruise Control,Air Conditioning,Reversing Camera,Power Steering',
+                'body_style': 'SUV',
+                'engine': '1.5L Turbo',
+                'transmission': 'CVT',
+                'interior': 'Cloth',
+                'miles': 15000,
+                'doors': '4',
+                'passengers': 5,
+                'vin_no': 'HONDA987654321',
+                'milage': 32,
+                'fuel_type': 'Gasoline',
+                'no_of_owners': '1',
+                'is_featured': False,
+            },
+            {
+                'car_title': '2024 Honda Civic',
+                'state': 'CA',
+                'city': 'Los Angeles',
+                'color': 'Blue',
+                'model': 'Honda Civic',
+                'year': 2024,
+                'condition': 'New',
+                'price': 25000,
+                'description': 'Sporty and efficient compact car',
+                'features': 'Cruise Control,Air Conditioning,Bluetooth Handset,Seat Heating',
+                'body_style': 'Sedan',
+                'engine': '2.0L VTEC',
+                'transmission': 'Manual',
+                'interior': 'Sport Cloth',
+                'miles': 5,
+                'doors': '4',
+                'passengers': 5,
+                'vin_no': 'HONDA555666777',
+                'milage': 35,
+                'fuel_type': 'Gasoline',
+                'no_of_owners': '1',
+                'is_featured': True,
+            }
+        ]
+        
+        created_count = 0
+        for car_data in sample_cars:
+            car = Car.objects.create(**car_data)
+            created_count += 1
+            
+        return JsonResponse({
+            'status': 'success',
+            'message': f'Created {created_count} sample cars',
+            'total_cars': Car.objects.count()
+        })
+    else:
+        return JsonResponse({
+            'status': 'success',
+            'message': f'Database already has {car_count} cars',
+            'sample_cars': [f"{car.year} {car.model}" for car in Car.objects.all()[:5]]
+        })

@@ -758,13 +758,12 @@
 
         // Stop recognition while speaking
         safeStopRecognition();
-        updateCurrentResponse(text);
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 1.0;
         utterance.pitch = 1.0;
 
-        // Remove speaking animation when done
+        // Add speaking animation
         document.getElementById('currentResponse').classList.add('speaking');
 
         // When speaking ends
