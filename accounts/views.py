@@ -14,7 +14,11 @@ def login(request):
         user = auth.authenticate(username=username, password=password)
 
         if user is not None:
-            auth.login(request, user)
+            # Ensure backend attribute is set on user object for multiple backends support
+            if not hasattr(user, 'backend'):
+                user.backend = 'django.contrib.auth.backends.ModelBackend'
+            # Specify backend explicitly to avoid multiple backends error
+            auth.login(request, user, backend='django.contrib.auth.backends.ModelBackend')
             messages.success(request, 'You are now logged in.')
             
             # Check if there's a next parameter in the request
@@ -47,12 +51,12 @@ def register(request):
                     return redirect('register')
                 else:
                     user = User.objects.create_user(first_name=firstname, last_name=lastname, email=email, username=username, password=password)
-                    auth.login(request, user)
-                    messages.success(request, 'You are now logged in.')
+                    # Set backend attribute on user object for multiple backends support
+                    user.backend = 'django.contrib.auth.backends.ModelBackend'
+                    # Specify backend explicitly to avoid multiple backends error
+                    auth.login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+                    messages.success(request, 'You are now registered and logged in.')
                     return redirect('dashboard')
-                    user.save()
-                    messages.success(request, 'You are registered successfully.')
-                    return redirect('login')
         else:
             messages.error(request, 'Password do not match')
             return redirect('register')
